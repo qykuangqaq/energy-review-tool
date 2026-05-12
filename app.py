@@ -139,18 +139,6 @@ system_prompt = """
 **综合建议**：（汇总改进方向；如存在否决项或严重问题，必须明确指出）
 """
 
-# ===================== 侧边栏：API Key 输入 =====================
-with st.sidebar:
-    st.header("🔑 API 设置")
-    user_api_key = st.text_input(
-        "请输入 DeepSeek API Key",
-        type="password",
-        placeholder="sk-xxxxxxxxxx",
-        help="你的 Key 只会用于本次评审，不会保存。"
-    )
-    st.markdown("---")
-    st.markdown("[如何获取 DeepSeek API Key？](https://platform.deepseek.com/api_keys)")
-
 # ===================== 文件上传 =====================
 uploaded_file = st.file_uploader(
     "上传节能报告（支持 .pdf / .docx）",
@@ -158,70 +146,65 @@ uploaded_file = st.file_uploader(
     key="file_uploader"
 )
 
-# ===================== 评审按钮与评审逻辑 =====================
+# ===================== 评审按钮与逻辑 =====================
 if uploaded_file is not None:
     st.success(f"已上传文件：{uploaded_file.name}（大小：{uploaded_file.size / 1024:.1f} KB）")
 
-    if not user_api_key:
-        st.warning("⚠️ 请先在左侧边栏输入 DeepSeek API Key")
-    else:
-        # 评审按钮
-        start_review = st.button("🚀 开始评审", type="primary")
+    # 评审按钮
+    start_review = st.button("🚀 开始评审", type="primary")
 
-        if start_review:
-            st.write("📖 正在读取文件内容……")
-            # ---------- 读取文件 ----------
-            file_content = ""
-            try:
-                if uploaded_file.name.endswith(".pdf"):
-                    with pdfplumber.open(uploaded_file) as pdf:
-                        total_pages = len(pdf.pages)
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        for i, page in enumerate(pdf.pages):
-                            status_text.text(f"解析 PDF 第 {i+1}/{total_pages} 页……")
-                            page_text = page.extract_text()
-                            if page_text:
-                                file_content += page_text + "\n"
-                            progress_bar.progress((i + 1) / total_pages)
-                        status_text.text("PDF 解析完成")
-                else:  # docx
-                    doc = docx.Document(uploaded_file)
-                    paragraphs = doc.paragraphs
-                    total_paras = len(paragraphs)
+    if start_review:
+        st.write("📖 正在读取文件内容……")
+        file_content = ""
+        try:
+            if uploaded_file.name.endswith(".pdf"):
+                with pdfplumber.open(uploaded_file) as pdf:
+                    total_pages = len(pdf.pages)
                     progress_bar = st.progress(0)
                     status_text = st.empty()
-                    for i, para in enumerate(paragraphs):
-                        status_text.text(f"解析 Word 段落 {i+1}/{total_paras}……")
-                        file_content += para.text + "\n"
-                        progress_bar.progress((i + 1) / total_paras)
-                    status_text.text("Word 解析完成")
-            except Exception as e:
-                st.error(f"文件读取失败：{e}")
-                st.stop()
+                    for i, page in enumerate(pdf.pages):
+                        status_text.text(f"解析 PDF 第 {i+1}/{total_pages} 页……")
+                        page_text = page.extract_text()
+                        if page_text:
+                            file_content += page_text + "\n"
+                        progress_bar.progress((i + 1) / total_pages)
+                    status_text.text("PDF 解析完成")
+            else:  # docx
+                doc = docx.Document(uploaded_file)
+                paragraphs = doc.paragraphs
+                total_paras = len(paragraphs)
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                for i, para in enumerate(paragraphs):
+                    status_text.text(f"解析 Word 段落 {i+1}/{total_paras}……")
+                    file_content += para.text + "\n"
+                    progress_bar.progress((i + 1) / total_paras)
+                status_text.text("Word 解析完成")
+        except Exception as e:
+            st.error(f"文件读取失败：{e}")
+            st.stop()
 
-            if not file_content.strip():
-                st.warning("⚠️ 未能提取到文字内容，请确认文件不是扫描图片且不是空白文件。")
-            else:
-                st.success(f"文件读取成功，共提取 {len(file_content)} 个字符。正在调用 AI 评审……")
-                # ---------- 初始化 API ----------
-                client = OpenAI(
-                    api_key=user_api_key,
-                    base_url="https://api.deepseek.com"
-                )
-                try:
-                    with st.spinner("AI 评审中，请耐心等待（约 30-90 秒）……"):
-                        response = client.chat.completions.create(
-                            model="deepseek-chat",
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": file_content}
-                            ],
-                            temperature=0.3,
-                            max_tokens=4096,
-                        )
-                    result = response.choices[0].message.content
-                    st.success("✅ 评审完成！")
-                    st.markdown(result)
-                except Exception as e:
-                    st.error(f"调用 API 出错：{e}")
+        if not file_content.strip():
+            st.warning("⚠️ 未能提取到文字内容，请确认文件不是扫描图片且不是空白文件。")
+        else:
+            st.success(f"文件读取成功，共提取 {len(file_content)} 个字符。正在调用 AI 评审……")
+            client = OpenAI(
+                api_key=st.secrets["API_KEY"],   # 从云端 Secrets 读取 Key
+                base_url="https://api.deepseek.com"
+            )
+            try:
+                with st.spinner("AI 评审中，请耐心等待（约 30-90 秒）……"):
+                    response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": file_content}
+                        ],
+                        temperature=0.3,
+                        max_tokens=4096,
+                    )
+                result = response.choices[0].message.content
+                st.success("✅ 评审完成！")
+                st.markdown(result)
+            except Exception as e:
+                st.error(f"调用 API 出错：{e}")
