@@ -32,8 +32,32 @@ from openai import OpenAI
 import docx
 import pdfplumber
 
+
 # ===================== 页面配置 =====================
 st.set_page_config(page_title="节能报告初审工具", layout="wide")
+
+# ===================== 访问密码校验 =====================
+def check_password():
+    """返回 True 表示已通过验证"""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    st.title("🔐 请输入访问密码")
+    password = st.text_input("密码", type="password", key="login_password")
+    if st.button("验证"):
+        if password == st.secrets["APP_PASSWORD"]:
+            st.session_state.authenticated = True
+            st.rerun()  # 重新运行以显示主界面
+        else:
+            st.error("密码错误，请重试")
+    return False
+
+if not check_password():
+    st.stop()   # 密码未通过时，停止执行后面的所有代码
+
 st.title("📋 新上项目（在建整改项目）节能报告初审工具")
 st.markdown("上传节能报告（**仅支持 .pdf 或 .docx**，旧版 .doc 请先另存为 .docx）")
 
