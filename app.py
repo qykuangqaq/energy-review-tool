@@ -219,7 +219,7 @@ if uploaded_file is not None:
             try:
                 with st.spinner("AI 评审中，请耐心等待（约 30-90 秒）……"):
                     response = client.chat.completions.create(
-                        model="deepseek-chat",
+                        model="deepseek-v4-pro",
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": file_content}
