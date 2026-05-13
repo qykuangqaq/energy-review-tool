@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
-import sys, os, io
+import sys
+import os
+import io
 
 # ===================== 编码设置 =====================
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 if sys.stderr.encoding != 'utf-8':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 os.environ['PYTHONUTF8'] = '1'
 
@@ -160,7 +164,7 @@ uploaded_file = st.file_uploader(
     key="file_uploader"
 )
 
-# ===================== 额外指令词输入框（新增） =====================
+# ===================== 额外指令词输入框 =====================
 st.markdown("---")
 st.markdown("### ⚙️ 针对本次评审的特殊要求（可选）")
 extra_instructions = st.text_area(
@@ -169,7 +173,7 @@ extra_instructions = st.text_area(
     height=100
 )
 
-# ===================== 评审按钮 =====================
+# ===================== 评审按钮与逻辑 =====================
 if uploaded_file is not None:
     st.success(f"已上传文件：{uploaded_file.name}（大小：{uploaded_file.size / 1024:.1f} KB）")
 
@@ -234,5 +238,27 @@ if uploaded_file is not None:
                 result = response.choices[0].message.content
                 st.success("✅ 评审完成！")
                 st.markdown(result)
+
+                # ==================== 生成 Word 下载按钮 ====================
+                from docx import Document
+
+                word_doc = Document()
+                word_doc.add_heading('节能报告初审意见', level=1)
+
+                # 将 Markdown 格式的评审结果按行写入 Word
+                for line in result.split('\n'):
+                    if line.strip():
+                        word_doc.add_paragraph(line.strip())
+
+                word_buffer = io.BytesIO()
+                word_doc.save(word_buffer)
+                word_buffer.seek(0)
+
+                st.download_button(
+                    label="📥 下载评审意见 (Word)",
+                    data=word_buffer,
+                    file_name=f"评审意见_{uploaded_file.name.rsplit('.', 1)[0]}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
             except Exception as e:
                 st.error(f"调用 API 出错：{e}")
