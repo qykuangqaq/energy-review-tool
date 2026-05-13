@@ -1,23 +1,15 @@
 # -*- coding: utf-8 -*-
-"""
-新上项目（在建整改项目）节能报告初审工具
-使用方法：终端执行 streamlit run app.py
-"""
-import sys
-import os
-import io
+import sys, os, io
 
-# ===================== 彻底解决中文编码报错 =====================
+# ===================== 编码设置 =====================
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 if sys.stderr.encoding != 'utf-8':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 os.environ['PYTHONUTF8'] = '1'
 
@@ -26,19 +18,16 @@ logging.getLogger("openai").setLevel(logging.ERROR)
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("httpcore").setLevel(logging.ERROR)
 
-# ===================== 导入界面和解析库 =====================
 import streamlit as st
 from openai import OpenAI
 import docx
 import pdfplumber
-
 
 # ===================== 页面配置 =====================
 st.set_page_config(page_title="节能报告初审工具", layout="wide")
 
 # ===================== 访问密码校验 =====================
 def check_password():
-    """返回 True 表示已通过验证"""
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
@@ -50,14 +39,15 @@ def check_password():
     if st.button("验证"):
         if password == st.secrets["APP_PASSWORD"]:
             st.session_state.authenticated = True
-            st.rerun()  # 重新运行以显示主界面
+            st.rerun()
         else:
             st.error("密码错误，请重试")
     return False
 
 if not check_password():
-    st.stop()   # 密码未通过时，停止执行后面的所有代码
+    st.stop()
 
+# ===================== 主界面 =====================
 st.title("📋 新上项目（在建整改项目）节能报告初审工具")
 st.markdown("上传节能报告（**仅支持 .pdf 或 .docx**，旧版 .doc 请先另存为 .docx）")
 
@@ -77,7 +67,7 @@ system_prompt = """
 - 六、能源消费情况核算及能效水平评价（含碳排放评价）
 - 七、能源消费影响分析
 - 八、结论
-- 九、节能承诺书
+
 
 ### 2. 项目边界一致性
 - 报告描述（项目名称/建设单位/建设内容/面积）是否与备案证或环评批复等文件一致；
@@ -170,11 +160,19 @@ uploaded_file = st.file_uploader(
     key="file_uploader"
 )
 
-# ===================== 评审按钮与逻辑 =====================
+# ===================== 额外指令词输入框（新增） =====================
+st.markdown("---")
+st.markdown("### ⚙️ 针对本次评审的特殊要求（可选）")
+extra_instructions = st.text_area(
+    "填写后，会覆盖或补充默认评审规则。例如：\"本次不审查碳排放部分\"、\"重点审查用能设备能效水平\"、\"只关注第3、5、11项\"等。",
+    placeholder="请输入额外的评审要求（留空则按默认规则评审）",
+    height=100
+)
+
+# ===================== 评审按钮 =====================
 if uploaded_file is not None:
     st.success(f"已上传文件：{uploaded_file.name}（大小：{uploaded_file.size / 1024:.1f} KB）")
 
-    # 评审按钮
     start_review = st.button("🚀 开始评审", type="primary")
 
     if start_review:
@@ -212,8 +210,14 @@ if uploaded_file is not None:
             st.warning("⚠️ 未能提取到文字内容，请确认文件不是扫描图片且不是空白文件。")
         else:
             st.success(f"文件读取成功，共提取 {len(file_content)} 个字符。正在调用 AI 评审……")
+
+            # --- 组合最终的系统提示词：默认规则 + 额外指令 ---
+            final_prompt = system_prompt
+            if extra_instructions.strip():
+                final_prompt += f"\n\n## ⚠️ 本次评审特别要求\n{extra_instructions.strip()}\n请严格遵循以上特别要求，其优先级高于默认规则。"
+
             client = OpenAI(
-                api_key=st.secrets["API_KEY"],   # 从云端 Secrets 读取 Key
+                api_key=st.secrets["API_KEY"],
                 base_url="https://api.deepseek.com"
             )
             try:
@@ -221,10 +225,10 @@ if uploaded_file is not None:
                     response = client.chat.completions.create(
                         model="deepseek-v4-pro",
                         messages=[
-                            {"role": "system", "content": system_prompt},
+                            {"role": "system", "content": final_prompt},
                             {"role": "user", "content": file_content}
                         ],
-                        temperature=0.3,
+                        temperature=0.2,
                         max_tokens=4096,
                     )
                 result = response.choices[0].message.content
