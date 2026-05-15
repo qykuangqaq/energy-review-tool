@@ -30,6 +30,14 @@ import pdfplumber
 # ===================== 页面配置 =====================
 st.set_page_config(page_title="节能报告初审工具", layout="wide")
 
+# ===================== 初始化 session_state =====================
+if "review_result" not in st.session_state:
+    st.session_state.review_result = None
+if "file_content" not in st.session_state:
+    st.session_state.file_content = None
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
 # ===================== 访问密码校验 =====================
 def check_password():
     if "authenticated" not in st.session_state:
@@ -55,7 +63,7 @@ if not check_password():
 st.title("📋 新上项目（在建整改项目）节能报告初审工具")
 st.markdown("上传节能报告（**仅支持 .pdf 或 .docx**，旧版 .doc 请先另存为 .docx）")
 
-# ===================== 系统提示词（评审规则） =====================
+# ===================== 系统提示词（完整14项评审规则） =====================
 system_prompt = """
 你是一位专业的节能评审专家。请严格按照下面的评审表，对用户提供的节能报告逐项进行审核，并输出评审结论和具体的修改建议。
 
@@ -71,7 +79,7 @@ system_prompt = """
 - 六、能源消费情况核算及能效水平评价（含碳排放评价）
 - 七、能源消费影响分析
 - 八、结论
-
+- 九、节能承诺书
 
 ### 2. 项目边界一致性
 - 报告描述（项目名称/建设单位/建设内容/面积）是否与备案证或环评批复等文件一致；
@@ -180,6 +188,9 @@ if uploaded_file is not None:
     start_review = st.button("🚀 开始评审", type="primary")
 
     if start_review:
+        # 清空旧的聊天记录（新评审开始）
+        st.session_state.chat_history = []
+
         st.write("📖 正在读取文件内容……")
         file_content = ""
         try:
@@ -215,7 +226,7 @@ if uploaded_file is not None:
         else:
             st.success(f"文件读取成功，共提取 {len(file_content)} 个字符。正在调用 AI 评审……")
 
-            # --- 组合最终的系统提示词：默认规则 + 额外指令 ---
+            # --- 组合最终的系统提示词 ---
             final_prompt = system_prompt
             if extra_instructions.strip():
                 final_prompt += f"\n\n## ⚠️ 本次评审特别要求\n{extra_instructions.strip()}\n请严格遵循以上特别要求，其优先级高于默认规则。"
@@ -236,6 +247,12 @@ if uploaded_file is not None:
                         max_tokens=4096,
                     )
                 result = response.choices[0].message.content
+
+                # 将结果和文件内容存入 session_state，防止页面刷新丢失
+                st.session_state.review_result = result
+                st.session_state.file_content = file_content
+                st.session_state.reviewed_file_name = uploaded_file.name
+
                 st.success("✅ 评审完成！")
                 st.markdown(result)
 
@@ -245,7 +262,6 @@ if uploaded_file is not None:
                 word_doc = Document()
                 word_doc.add_heading('节能报告初审意见', level=1)
 
-                # 将 Markdown 格式的评审结果按行写入 Word
                 for line in result.split('\n'):
                     if line.strip():
                         word_doc.add_paragraph(line.strip())
@@ -262,3 +278,79 @@ if uploaded_file is not None:
                 )
             except Exception as e:
                 st.error(f"调用 API 出错：{e}")
+
+# ===================== 如果 session 中已有评审结果，直接显示（防清空） =====================
+elif st.session_state.review_result is not None:
+    st.success("✅ 评审完成（历史结果）")
+    st.markdown(st.session_state.review_result)
+
+    # 重新生成下载按钮（避免因刷新丢失）
+    from docx import Document
+    word_doc = Document()
+    word_doc.add_heading('节能报告初审意见', level=1)
+    for line in st.session_state.review_result.split('\n'):
+        if line.strip():
+            word_doc.add_paragraph(line.strip())
+    word_buffer = io.BytesIO()
+    word_doc.save(word_buffer)
+    word_buffer.seek(0)
+    st.download_button(
+        label="📥 下载评审意见 (Word)",
+        data=word_buffer,
+        file_name=f"评审意见_{st.session_state.reviewed_file_name.rsplit('.', 1)[0]}.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+# ===================== 侧边栏：问答功能 =====================
+st.sidebar.title("💬 对报告提问")
+if st.session_state.review_result is None:
+    st.sidebar.info("请先完成报告评审，然后可以在此处针对报告内容提问。")
+else:
+    # 显示聊天记录
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.sidebar.markdown(f"**🧑 你：** {msg['content']}")
+        else:
+            st.sidebar.markdown(f"**🤖 AI：** {msg['content']}")
+
+    # 输入新问题
+    with st.sidebar.form("question_form", clear_on_submit=True):
+        user_question = st.text_input("输入你的问题", key="question_input")
+        submit_question = st.form_submit_button("发送")
+
+    if submit_question and user_question.strip():
+        # 将用户问题加入历史
+        st.session_state.chat_history.append({"role": "user", "content": user_question.strip()})
+
+        # 构建问答用的系统提示词（包含报告背景和评审结果）
+        qa_system_prompt = f"""你是一位精通节能评审的专家。以下是一份节能报告的评审结果，用户将基于这份报告和评审意见提出问题。请结合报告内容和评审结果，给出专业、准确的回答。
+
+## 报告内容
+{st.session_state.file_content}
+
+## 评审结果
+{st.session_state.review_result}
+
+请根据以上信息回答用户的问题。如果问题超出报告范围，请如实说明。"""
+
+        # 调用 API
+        client = OpenAI(
+            api_key=st.secrets["API_KEY"],
+            base_url="https://api.deepseek.com"
+        )
+        with st.sidebar.spinner("思考中…"):
+            try:
+                response = client.chat.completions.create(
+                    model="deepseek-v4-pro",
+                    messages=[
+                        {"role": "system", "content": qa_system_prompt},
+                        *st.session_state.chat_history
+                    ],
+                    temperature=0.2,
+                    max_tokens=2048,
+                )
+                answer = response.choices[0].message.content
+                st.session_state.chat_history.append({"role": "assistant", "content": answer})
+                st.rerun()  # 刷新以显示新消息
+            except Exception as e:
+                st.sidebar.error(f"提问失败：{e}")
